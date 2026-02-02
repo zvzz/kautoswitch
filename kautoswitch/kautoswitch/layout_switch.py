@@ -1,9 +1,15 @@
-"""Keyboard layout switching via X11 (setxkbmap / xdotool).
+"""Keyboard layout switching via X11 (setxkbmap / xdotool / ctypes XKB).
 
 CRITICAL RULE: No function in this module may raise an uncaught exception.
-Every external call (subprocess, Xlib, ctypes) is wrapped in try/except.
+Every external call (subprocess, ctypes) is wrapped in try/except.
 Layout switching is best-effort — failure is logged and silently ignored.
+
+NOTE: python-xlib is NOT used here. All X11 calls use ctypes with proper
+XOpenDisplay/XCloseDisplay. Mixing python-xlib Display objects with ctypes
+Xkb calls causes segfaults (fileno() returns int, not Display*).
 """
+import ctypes
+import ctypes.util
 import subprocess
 import logging
 from typing import Optional
@@ -13,6 +19,125 @@ logger = logging.getLogger(__name__)
 # Layout names as used by setxkbmap
 LAYOUT_EN = 'us'
 LAYOUT_RU = 'ru'
+
+# --------------------------------------------------------------------------
+# ctypes bindings for libX11 XKB functions
+# --------------------------------------------------------------------------
+_libX11 = None
+
+try:
+    _lib_path = ctypes.util.find_library('X11') or 'libX11.so.6'
+    _libX11 = ctypes.CDLL(_lib_path)
+
+    _libX11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    _libX11.XOpenDisplay.restype = ctypes.c_void_p
+
+    _libX11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    _libX11.XCloseDisplay.restype = ctypes.c_int
+
+    _libX11.XFlush.argtypes = [ctypes.c_void_p]
+    _libX11.XFlush.restype = ctypes.c_int
+
+    _libX11.XkbGetState.argtypes = [
+        ctypes.c_void_p,   # Display*
+        ctypes.c_uint,     # deviceSpec (XkbUseCoreKbd = 0x0100)
+        ctypes.POINTER(ctypes.c_ubyte * 15),  # placeholder, replaced below
+    ]
+    _libX11.XkbGetState.restype = ctypes.c_int
+
+    _libX11.XkbLockGroup.argtypes = [
+        ctypes.c_void_p,   # Display*
+        ctypes.c_uint,     # deviceSpec
+        ctypes.c_uint,     # group
+    ]
+    _libX11.XkbLockGroup.restype = ctypes.c_int
+
+except Exception as e:
+    logger.debug("Failed to load libX11 ctypes bindings: %s", e)
+    _libX11 = None
+
+
+class XkbStateRec(ctypes.Structure):
+    _fields_ = [
+        ('group', ctypes.c_ubyte),
+        ('locked_group', ctypes.c_ubyte),
+        ('base_group', ctypes.c_ushort),
+        ('latched_group', ctypes.c_ushort),
+        ('mods', ctypes.c_ubyte),
+        ('base_mods', ctypes.c_ubyte),
+        ('latched_mods', ctypes.c_ubyte),
+        ('locked_mods', ctypes.c_ubyte),
+        ('compat_state', ctypes.c_ubyte),
+        ('grab_mods', ctypes.c_ubyte),
+        ('compat_grab_mods', ctypes.c_ubyte),
+        ('lookup_mods', ctypes.c_ubyte),
+        ('compat_lookup_mods', ctypes.c_ubyte),
+        ('ptr_buttons', ctypes.c_ushort),
+    ]
+
+
+# Fix up XkbGetState argtypes now that XkbStateRec is defined
+if _libX11 is not None:
+    try:
+        _libX11.XkbGetState.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.POINTER(XkbStateRec),
+        ]
+    except Exception:
+        pass
+
+# XkbUseCoreKbd
+_XKB_USE_CORE_KBD = 0x0100
+
+
+def _xkb_get_group(layouts_csv: str) -> Optional[str]:
+    """Get current XKB group using ctypes XOpenDisplay + XkbGetState.
+
+    Returns the layout name from layouts_csv corresponding to the active group,
+    or None on failure. Never raises.
+    """
+    if _libX11 is None:
+        return None
+    try:
+        dpy = _libX11.XOpenDisplay(None)
+        if not dpy:
+            return None
+        try:
+            state = XkbStateRec()
+            ret = _libX11.XkbGetState(dpy, _XKB_USE_CORE_KBD, ctypes.byref(state))
+            if ret == 0:
+                group = state.group
+                layout_list = [l.strip() for l in layouts_csv.split(',')]
+                if group < len(layout_list):
+                    return layout_list[group]
+        finally:
+            _libX11.XCloseDisplay(dpy)
+    except Exception as e:
+        logger.debug("_xkb_get_group failed: %s", e)
+    return None
+
+
+def _xkb_lock_group(group_idx: int) -> bool:
+    """Switch XKB group using ctypes XOpenDisplay + XkbLockGroup.
+
+    Returns True on success, False on failure. Never raises.
+    """
+    if _libX11 is None:
+        return False
+    try:
+        dpy = _libX11.XOpenDisplay(None)
+        if not dpy:
+            return False
+        try:
+            ret = _libX11.XkbLockGroup(dpy, _XKB_USE_CORE_KBD, group_idx)
+            _libX11.XFlush(dpy)
+            return ret == 1  # Success returns True (non-zero)
+        finally:
+            _libX11.XCloseDisplay(dpy)
+    except Exception as e:
+        logger.debug("_xkb_lock_group failed: %s", e)
+    return False
 
 
 def get_current_layout() -> Optional[str]:
@@ -37,7 +162,7 @@ def get_current_layout() -> Optional[str]:
         except Exception as e:
             logger.debug("xkb-switch query failed: %s", e)
 
-        # Try setxkbmap -query
+        # Try setxkbmap -query to get layout list
         try:
             result = subprocess.run(
                 ['setxkbmap', '-query'],
@@ -55,42 +180,10 @@ def get_current_layout() -> Optional[str]:
         if not layouts:
             return None
 
-        # Try XKB group detection via ctypes
-        try:
-            import ctypes
-            xkb = ctypes.cdll.LoadLibrary('libX11.so.6')
-
-            class XkbStateRec(ctypes.Structure):
-                _fields_ = [
-                    ('group', ctypes.c_ubyte),
-                    ('locked_group', ctypes.c_ubyte),
-                    ('base_group', ctypes.c_ushort),
-                    ('latched_group', ctypes.c_ushort),
-                    ('mods', ctypes.c_ubyte),
-                    ('base_mods', ctypes.c_ubyte),
-                    ('latched_mods', ctypes.c_ubyte),
-                    ('locked_mods', ctypes.c_ubyte),
-                    ('compat_state', ctypes.c_ubyte),
-                    ('grab_mods', ctypes.c_ubyte),
-                    ('compat_grab_mods', ctypes.c_ubyte),
-                    ('lookup_mods', ctypes.c_ubyte),
-                    ('compat_lookup_mods', ctypes.c_ubyte),
-                    ('ptr_buttons', ctypes.c_ushort),
-                ]
-
-            from Xlib import display as xdisplay
-            d = xdisplay.Display()
-            state = XkbStateRec()
-            ret = xkb.XkbGetState(d.display.fileno(), 0x0100, ctypes.byref(state))
-            if ret == 0:
-                group = state.group
-                layout_list = layouts.split(',')
-                if group < len(layout_list):
-                    d.close()
-                    return layout_list[group].strip()
-            d.close()
-        except Exception:
-            pass
+        # Try XKB group detection via ctypes (proper XOpenDisplay, no python-xlib)
+        xkb_result = _xkb_get_group(layouts)
+        if xkb_result is not None:
+            return xkb_result
 
         # Last resort: return first layout from setxkbmap
         return layouts.split(',')[0].strip()
@@ -120,7 +213,7 @@ def switch_to_layout(layout: str):
         except Exception as e:
             logger.debug("xkb-switch set failed: %s", e)
 
-        # Try XKB group switching via ctypes + python-xlib
+        # Try XKB group switching via ctypes (proper XOpenDisplay)
         try:
             query = subprocess.run(
                 ['setxkbmap', '-query'],
@@ -135,18 +228,10 @@ def switch_to_layout(layout: str):
             layout_list = [l.strip() for l in layouts_line.split(',')]
             if layout in layout_list:
                 group_idx = layout_list.index(layout)
-                try:
-                    import ctypes
-                    from Xlib import display as xdisplay
-                    xkb = ctypes.cdll.LoadLibrary('libX11.so.6')
-                    d = xdisplay.Display()
-                    xkb.XkbLockGroup(d.display.fileno(), 0x0100, group_idx)
-                    d.flush()
-                    d.close()
-                    logger.info("Layout switched to %s (group %d) via XKB", layout, group_idx)
+
+                if _xkb_lock_group(group_idx):
+                    logger.info("Layout switched to %s (group %d) via XKB ctypes", layout, group_idx)
                     return
-                except Exception as e:
-                    logger.debug("XKB group switch failed: %s", e)
 
                 # Fallback: xdotool
                 try:
