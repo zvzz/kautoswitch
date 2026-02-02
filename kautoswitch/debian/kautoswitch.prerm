@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    remove|purge)
+        # Best-effort: stop user service for the invoking user
+        # This may fail if run as root during apt remove — that is expected
+        if [ -n "$SUDO_USER" ]; then
+            su - "$SUDO_USER" -c "systemctl --user stop kautoswitch.service 2>/dev/null || true"
+            su - "$SUDO_USER" -c "systemctl --user disable kautoswitch.service 2>/dev/null || true"
+        else
+            systemctl --user stop kautoswitch.service 2>/dev/null || true
+            systemctl --user disable kautoswitch.service 2>/dev/null || true
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

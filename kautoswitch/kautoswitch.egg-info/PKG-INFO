@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: kautoswitch
+Version: 0.1.0.post4
+Summary: KAutoSwitch for Ubuntu KDE — local-only keyboard layout corrector
+Requires-Python: >=3.8
+Dynamic: requires-python
+Dynamic: summary

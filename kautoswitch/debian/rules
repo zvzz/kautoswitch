@@ -1,0 +1,25 @@
+#!/usr/bin/make -f
+
+export PYBUILD_NAME=kautoswitch
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_test:
+	@echo "Skipping tests during build (require X11 for full test)"
+
+override_dh_auto_install:
+	dh_auto_install
+	# Install systemd user unit
+	install -D -m 644 packaging/systemd/kautoswitch.service \
+		debian/kautoswitch/usr/lib/systemd/user/kautoswitch.service
+	# Install XDG autostart desktop entry
+	install -D -m 644 packaging/autostart/kautoswitch-tray.desktop \
+		debian/kautoswitch/etc/xdg/autostart/kautoswitch-tray.desktop
+	# Install wrapper scripts
+	install -D -m 755 debian/kautoswitch-daemon.sh \
+		debian/kautoswitch/usr/bin/kautoswitch-daemon
+	install -D -m 755 debian/kautoswitch-tray.sh \
+		debian/kautoswitch/usr/bin/kautoswitch-tray
+	install -D -m 755 debian/kautoswitch-full.sh \
+		debian/kautoswitch/usr/bin/kautoswitch

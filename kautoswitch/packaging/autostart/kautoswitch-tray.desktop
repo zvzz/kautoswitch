@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=KAutoSwitch Tray
+Comment=System tray for KAutoSwitch keyboard layout corrector
+Exec=/usr/bin/kautoswitch-tray
+Icon=preferences-desktop-keyboard
+Terminal=false
+Categories=Utility;Accessibility;
+X-KDE-autostart-phase=2
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

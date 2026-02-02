@@ -1,0 +1,2 @@
+include kautoswitch/resources/*
+recursive-include kautoswitch/vendor *

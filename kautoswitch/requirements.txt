@@ -1,0 +1,4 @@
+python-xlib>=0.33
+PyQt5>=5.15
+pyspellchecker>=0.8
+requests>=2.28

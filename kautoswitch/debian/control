@@ -1,0 +1,33 @@
+Source: kautoswitch
+Section: utils
+Priority: optional
+Maintainer: KAutoSwitch <kautoswitch@localhost>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ python3-all,
+ python3-setuptools,
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: kautoswitch
+Architecture: all
+Depends:
+ ${python3:Depends},
+ ${misc:Depends},
+ python3-xlib (>= 0.33),
+ python3-pyqt5,
+ python3-requests,
+ xdotool,
+Description: KAutoSwitch — local-only keyboard layout auto-corrector
+ Intercepts keystrokes globally on X11, detects wrong keyboard layout,
+ typos, and mixed-layout words, then corrects them in-place.
+ .
+ Features:
+  - QWERTY↔ЙЦУКЕН automatic layout correction
+  - Typo correction with Damerau-Levenshtein distance
+  - Mixed-layout word fixing
+  - Undo / rethink hotkeys
+  - 3x-undo learning rules
+  - System tray + Qt settings window
+  - Strictly local, no network required

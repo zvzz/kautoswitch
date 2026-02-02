@@ -1,0 +1,2 @@
+[console_scripts]
+kautoswitch = kautoswitch.main:main

@@ -1,0 +1,33 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    configure)
+        echo ""
+        echo "========================================"
+        echo "  KAutoSwitch installed."
+        echo "========================================"
+        echo ""
+        echo "To enable for your user session (X11):"
+        echo ""
+        echo "  systemctl --user daemon-reload"
+        echo "  systemctl --user enable --now kautoswitch.service"
+        echo "  systemctl --user status kautoswitch.service"
+        echo ""
+        echo "The tray icon will auto-start on next login"
+        echo "(via /etc/xdg/autostart/kautoswitch-tray.desktop)."
+        echo ""
+        echo "Or run manually:"
+        echo "  kautoswitch          # full mode (daemon + tray)"
+        echo "  kautoswitch-daemon   # daemon only"
+        echo "  kautoswitch-tray     # tray only"
+        echo ""
+        echo "Quick smoke test:"
+        echo "  /usr/share/kautoswitch/smoke_test_local.sh"
+        echo ""
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

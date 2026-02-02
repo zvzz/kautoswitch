@@ -1,0 +1,37 @@
+kautoswitch (0.1.0-4) unstable; urgency=low
+
+  * Switch keyboard layout to corrected language after word/phrase correction.
+  * Add HANDOFF state: stop all correction after fix, resume on new mismatch.
+  * Enforce space/punctuation preservation after correction (boundary char
+    always emitted in replacement text).
+  * API model selection: fetch available models via /v1/models, dropdown in UI.
+  * Selected API model stored in config and sent in correction requests.
+  * Polish mode (Ctrl+Shift+L): one-shot cleanup of current line text
+    (layout fix + spelling), non-intrusive, deterministic, reversible via Undo.
+  * Layout after polish switches to match last word of polished text.
+  * New tests: layout switch, space preservation, punctuation, API models,
+    polish mode (entire line, selection, layout, no-rewrite), HANDOFF mode.
+  * Version bumped to 0.1.0-4.
+
+ -- KAutoSwitch <kautoswitch@localhost>  Sat, 01 Feb 2026 18:00:00 +0000
+
+kautoswitch (0.1.0-2) unstable; urgency=low
+
+  * Fix repeated correction loop after space (word finalization guard).
+  * Defer phrase correction to idle timeout (350ms), cancelable on typing.
+  * Add input state machine (TYPING, WORD_FINALIZED, IDLE).
+  * Phrase correction no longer blocks input.
+
+ -- KAutoSwitch <kautoswitch@localhost>  Sat, 01 Feb 2026 12:00:00 +0000
+
+kautoswitch (0.1.0-1) unstable; urgency=low
+
+  * Initial release.
+  * X11 global keystroke interception via XRecord.
+  * Layout correction (QWERTY↔ЙЦУКЕН), typo correction, mixed-layout fix.
+  * TinyLLM rule-based engine + optional local API mode.
+  * Undo/rethink hotkeys, 3x-undo learning rules.
+  * KDE system tray + Qt settings window.
+  * systemd user service + XDG autostart.
+
+ -- KAutoSwitch <kautoswitch@localhost>  Sat, 01 Feb 2026 00:00:00 +0000
