@@ -12,7 +12,7 @@ from kautoswitch.replacer import X11Replacer
 from kautoswitch.undo import UndoStack, CorrectionEntry
 from kautoswitch.rules import RuleStore
 from kautoswitch.config import Config
-from kautoswitch.layout_switch import switch_to_corrected_layout, detect_target_layout
+from kautoswitch.layout_map import detect_target_layout
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,10 @@ class Daemon:
         self._phrase_cancel: threading.Event = threading.Event()
         # Handoff mode: after correction, stop all correction until new wrong-layout detected
         self._handoff_layout: Optional[str] = None  # layout we switched to
+        # Layout switch request: daemon sets this, Qt main thread consumes it.
+        # This is the ONLY way layout switching is communicated — daemon NEVER
+        # calls X11/subprocess layout functions directly (segfault-safe).
+        self._requested_layout: Optional[str] = None
 
     @property
     def running(self):
@@ -59,6 +63,18 @@ class Daemon:
     @property
     def undo_stack(self):
         return self._undo_stack
+
+    def consume_layout_request(self) -> Optional[str]:
+        """Consume and return any pending layout switch request.
+
+        Called from Qt main thread via QTimer. Returns layout name
+        ('us', 'ru') or None if no request pending.
+        Thread-safe: reads and clears under lock.
+        """
+        with self._lock:
+            layout = self._requested_layout
+            self._requested_layout = None
+            return layout
 
     def set_tinyllm(self, tinyllm):
         self._tinyllm = tinyllm
@@ -331,19 +347,13 @@ class Daemon:
         new_text = corrected_phrase + self._last_word_boundary
         self._replacer.replace_text(old_len, new_text, listener=self._listener)
 
-        # Switch keyboard layout to match corrected text (best-effort, never fatal)
-        try:
-            switch_to_corrected_layout(corrected_phrase)
-        except Exception as e:
-            logger.warning("Layout switch failed after phrase correction (non-fatal): %s", e)
+        # Signal layout switch intent — actual switch happens in Qt main thread
+        target_layout = detect_target_layout(corrected_phrase)
+        self._requested_layout = target_layout
 
         # Enter HANDOFF mode — stop all correction, let user type naturally
         self._input_state = 'handoff'
-        try:
-            self._handoff_layout = detect_target_layout(corrected_phrase)
-        except Exception as e:
-            logger.warning("detect_target_layout failed (non-fatal): %s", e)
-            self._handoff_layout = None
+        self._handoff_layout = target_layout
 
         # Full buffer clear — prevents stale context from leaking
         self._buffer.clear()
@@ -377,19 +387,13 @@ class Daemon:
         new_text = corrected + self._last_word_boundary
         self._replacer.replace_text(old_len, new_text, listener=self._listener)
 
-        # Switch keyboard layout to match corrected text (best-effort, never fatal)
-        try:
-            switch_to_corrected_layout(corrected)
-        except Exception as e:
-            logger.warning("Layout switch failed after word correction (non-fatal): %s", e)
+        # Signal layout switch intent — actual switch happens in Qt main thread
+        target_layout = detect_target_layout(corrected)
+        self._requested_layout = target_layout
 
         # Enter HANDOFF mode — stop all correction, let user type naturally
         self._input_state = 'handoff'
-        try:
-            self._handoff_layout = detect_target_layout(corrected)
-        except Exception as e:
-            logger.warning("detect_target_layout failed (non-fatal): %s", e)
-            self._handoff_layout = None
+        self._handoff_layout = target_layout
 
         # Full buffer clear — prevents stale context from leaking
         self._buffer.clear()
@@ -517,19 +521,13 @@ class Daemon:
             old_len = len(line_text)
             self._replacer.replace_text(old_len, polished, listener=self._listener)
 
-            # Switch layout to match last word of polished text (best-effort)
-            try:
-                switch_to_corrected_layout(polished)
-            except Exception as e:
-                logger.warning("Layout switch failed after polish (non-fatal): %s", e)
+            # Signal layout switch intent — actual switch happens in Qt main thread
+            target_layout = detect_target_layout(polished)
+            self._requested_layout = target_layout
 
             # Enter handoff mode
             self._input_state = 'handoff'
-            try:
-                self._handoff_layout = detect_target_layout(polished)
-            except Exception as e:
-                logger.warning("detect_target_layout failed (non-fatal): %s", e)
-                self._handoff_layout = None
+            self._handoff_layout = target_layout
 
             # Clear buffers
             self._buffer.clear()

@@ -91,3 +91,35 @@ def is_all_caps(text: str) -> bool:
     """Check if text is all uppercase (CapsLock detection)."""
     alpha = [c for c in text if c.isalpha()]
     return len(alpha) > 1 and all(c.isupper() for c in alpha)
+
+
+# Layout identifiers (matching layout_switch.py constants)
+LAYOUT_EN = 'us'
+LAYOUT_RU = 'ru'
+
+
+def detect_target_layout(corrected_text: str) -> str | None:
+    """Detect which keyboard layout the corrected text belongs to.
+
+    Returns 'us' for English, 'ru' for Russian, or None.
+    Pure string analysis — no X11 calls, safe to call from any thread.
+    """
+    if not corrected_text:
+        return None
+
+    words = corrected_text.split()
+    last_word = words[-1] if words else corrected_text
+
+    alpha = [c for c in last_word if c.isalpha()]
+    if not alpha:
+        return None
+
+    ru_count = sum(1 for c in alpha if '\u0400' <= c <= '\u04ff')
+    en_count = sum(1 for c in alpha if c.isascii())
+
+    if ru_count > en_count:
+        return LAYOUT_RU
+    elif en_count > ru_count:
+        return LAYOUT_EN
+
+    return None

@@ -28,7 +28,7 @@ from kautoswitch.undo import UndoStack, CorrectionEntry
 from kautoswitch.rules import RuleStore
 from kautoswitch.tinyllm import TinyLLM
 from kautoswitch.api_client import APIClient
-from kautoswitch.layout_switch import detect_target_layout
+from kautoswitch.layout_map import detect_target_layout
 
 PASS = 0
 FAIL = 0
@@ -96,7 +96,8 @@ class SimpleDaemon:
         self._phrase_timer = None
         self._phrase_cancel = threading.Event()
         self._handoff_layout = None
-        self._layout_switches = []  # track layout switch calls
+        self._requested_layout = None  # layout switch intent (consumed by UI thread)
+        self._layout_switches = []  # track layout switch requests for test assertions
 
     def feed_chars(self, text):
         for char in text:
@@ -197,8 +198,10 @@ class SimpleDaemon:
         new_text = corrected + self._last_word_boundary
         self._replacer.replace_text(old_len, new_text, listener=self._listener)
 
-        # Simulate layout switch
+        # Signal layout switch intent (real daemon sets _requested_layout,
+        # actual X11 switch happens in Qt main thread)
         target = detect_target_layout(corrected)
+        self._requested_layout = target
         if target:
             self._layout_switches.append(target)
 

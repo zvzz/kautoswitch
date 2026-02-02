@@ -20,6 +20,39 @@ def setup_logging(debug: bool = False):
     )
 
 
+def _start_layout_switch_timer(daemon):
+    """Start a QTimer that polls daemon for layout switch requests.
+
+    Runs in the Qt main thread — the ONLY safe place for X11/layout calls.
+    Xlib is NOT thread-safe: calling it from daemon/XRecord/Timer threads
+    causes segfaults that cannot be caught by try/except.
+    """
+    from PyQt5.QtCore import QTimer
+    from kautoswitch.layout_switch import switch_to_layout, get_current_layout
+
+    _log = logging.getLogger(__name__ + '.layout_timer')
+
+    def _poll_layout_request():
+        layout = daemon.consume_layout_request()
+        if layout is None:
+            return
+        try:
+            current = get_current_layout()
+            if current == layout:
+                _log.debug("Layout already %s, no switch needed", layout)
+                return
+            _log.info("Switching layout: %s → %s (from Qt main thread)", current, layout)
+            switch_to_layout(layout)
+        except Exception as e:
+            _log.warning("Layout switch failed (non-fatal): %s", e)
+
+    timer = QTimer()
+    timer.setInterval(50)  # poll every 50ms — low overhead, fast response
+    timer.timeout.connect(_poll_layout_request)
+    timer.start()
+    return timer  # caller must keep reference to prevent GC
+
+
 def run_full():
     """Run daemon + tray in a single process (default mode)."""
     from PyQt5.QtWidgets import QApplication
@@ -46,18 +79,28 @@ def run_full():
     tray.show()
     daemon.start()
 
+    # Layout switching runs ONLY in Qt main thread via this timer
+    layout_timer = _start_layout_switch_timer(daemon)
+
     exit_code = app.exec_()
+    layout_timer.stop()
     daemon.stop()
     sys.exit(exit_code)
 
 
 def run_daemon():
-    """Run daemon only (headless, for systemd user service)."""
+    """Run daemon only (headless, for systemd user service).
+
+    In headless mode, layout switching is done from the main thread's
+    poll loop (same thread that calls time.sleep). This is safe because
+    the main thread is not the XRecord listener thread.
+    """
     import time
     from kautoswitch.config import Config
     from kautoswitch.tinyllm import TinyLLM
     from kautoswitch.api_client import APIClient
     from kautoswitch.daemon import Daemon
+    from kautoswitch.layout_switch import switch_to_layout, get_current_layout
 
     config = Config()
     setup_logging(config.debug_logging)
@@ -74,7 +117,17 @@ def run_daemon():
 
     try:
         while daemon.running:
-            time.sleep(1)
+            # Poll for layout switch requests from main thread (X11-safe)
+            layout = daemon.consume_layout_request()
+            if layout is not None:
+                try:
+                    current = get_current_layout()
+                    if current != layout:
+                        logger.info("Switching layout: %s → %s (from main thread)", current, layout)
+                        switch_to_layout(layout)
+                except Exception as e:
+                    logger.warning("Layout switch failed (non-fatal): %s", e)
+            time.sleep(0.05)  # 50ms poll interval
     except KeyboardInterrupt:
         pass
     finally:

@@ -213,6 +213,27 @@ PYTHONPATH=. python tests/test_integration.py
    - Send Backspace×N via XTest
    - Send corrected characters via XTest
 
+### Why layout switching is UI-thread only
+
+Xlib is **NOT thread-safe**. The daemon runs its keyboard listener on an XRecord
+background thread, and deferred phrase correction uses Timer threads. Any X11 call
+(`XkbGetState`, `XkbLockGroup`, `setxkbmap`, `xkb-switch`) from these threads
+causes a **C-level segfault** that:
+
+- Cannot be caught by Python `try/except`
+- Produces no Python traceback
+- Kills the process immediately
+
+**Architecture rule:** `daemon.py` NEVER imports `layout_switch` and NEVER calls
+any X11/subprocess/ctypes function. Instead, it sets `_requested_layout` (a string
+like `'us'` or `'ru'`). The Qt main thread polls this field via a `QTimer` (50ms
+interval) and executes the actual layout switch in the UI thread where X11 calls
+are safe. In headless mode (`--daemon`), the main thread's poll loop performs the
+switch.
+
+This is enforced by `tests/test_no_layout_switch_in_daemon.py` which statically
+analyzes `daemon.py` via AST to ensure no X11-unsafe imports or symbols exist.
+
 ### Text replacement
 
 Uses XTest synthetic key events (NOT clipboard). Procedure:
